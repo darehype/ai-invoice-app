@@ -12,7 +12,7 @@ const toBase64 = file => new Promise((resolve, reject) => {
 
 // --- API Call Functions ---
 
-// Generic function to call the Gemini API
+// Generic function to call the Gemini API with retry logic
 const callGeminiAPI = async (payload, apiKey) => {
     if (!apiKey) {
         throw new Error("API Key is missing. Please enter your Google AI API Key in Settings.");
@@ -20,30 +20,58 @@ const callGeminiAPI = async (payload, apiKey) => {
     
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
     
-    const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
+    let lastError = null;
+    const maxRetries = 3;
 
-    if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`API request failed with status ${response.status}: ${errorBody}`);
-    }
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
 
-    const result = await response.json();
+            if (response.ok) {
+                 const result = await response.json();
+                 if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    return result.candidates[0].content.parts[0].text;
+                } else {
+                    console.error("Invalid API Response Structure:", result);
+                     if (result.promptFeedback && result.promptFeedback.blockReason) {
+                         lastError = new Error(`Request was blocked. Reason: ${result.promptFeedback.blockReason}. ${result.promptFeedback.blockReasonMessage || ''}`);
+                         break; // Don't retry on block errors
+                    }
+                    lastError = new Error("Invalid response structure from the API.");
+                    break; // Don't retry on malformed success responses
+                }
+            }
 
-    if (result.candidates && result.candidates.length > 0 &&
-        result.candidates[0].content && result.candidates[0].content.parts &&
-        result.candidates[0].content.parts.length > 0) {
-        return result.candidates[0].content.parts[0].text;
-    } else {
-        console.error("Invalid API Response:", result);
-        if (result.promptFeedback && result.promptFeedback.blockReason) {
-             throw new Error(`Request was blocked. Reason: ${result.promptFeedback.blockReason}. ${result.promptFeedback.blockReasonMessage || ''}`);
+            // Handle retryable server errors (like 503)
+            if (response.status === 503 && attempt < maxRetries) {
+                console.warn(`Attempt ${attempt} failed with status 503. Retrying in ${attempt * 1000}ms...`);
+                lastError = new Error(`API request failed with status ${response.status}: The model is temporarily overloaded.`);
+                await new Promise(resolve => setTimeout(resolve, attempt * 1000)); // Wait before retrying
+                continue; // Go to the next attempt
+            }
+            
+            // Handle other non-ok responses that we don't want to retry
+            const errorBody = await response.text();
+            lastError = new Error(`API request failed with status ${response.status}: ${errorBody}`);
+            break; // Exit loop for other errors
+
+        } catch (error) {
+            lastError = error; // Catch network errors
+            console.error(`Attempt ${attempt} failed with network error:`, error);
+            if (attempt < maxRetries) {
+                 await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            }
         }
-        throw new Error("Invalid response structure from the API.");
     }
+
+    // If all retries fail, throw the last captured error
+    throw lastError;
 };
 
 
