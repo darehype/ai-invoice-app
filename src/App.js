@@ -13,11 +13,9 @@ const toBase64 = file => new Promise((resolve, reject) => {
 // --- API Call Functions ---
 
 // Generic function to call the Gemini API
-const callGeminiAPI = async (payload) => {
-    // IMPORTANT: This line is changed to use the environment variable
-    const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+const callGeminiAPI = async (payload, apiKey) => {
     if (!apiKey) {
-        throw new Error("API Key is missing. Please set up your environment variables on Netlify.");
+        throw new Error("API Key is missing. Please enter your Google AI API Key.");
     }
     
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
@@ -92,11 +90,22 @@ const App = () => {
     const [fileName, setFileName] = useState('');
     const [modalContent, setModalContent] = useState(null);
     const [modalTitle, setModalTitle] = useState('');
+    const [apiKey, setApiKey] = useState(() => localStorage.getItem('geminiApiKey') || '');
+
+    const handleApiKeyChange = (e) => {
+        const newKey = e.target.value;
+        setApiKey(newKey);
+        localStorage.setItem('geminiApiKey', newKey);
+    };
 
     // Function to handle invoice transcription
     const transcribeInvoice = async (file) => {
         if (!file) {
             setError("Please select a file first.");
+            return;
+        }
+        if (!apiKey) {
+            setError("Please enter your Google AI API Key to proceed.");
             return;
         }
 
@@ -138,7 +147,7 @@ const App = () => {
                 }
             };
             
-            const jsonText = await callGeminiAPI(payload);
+            const jsonText = await callGeminiAPI(payload, apiKey);
             const parsedJson = JSON.parse(jsonText);
             // Initialize line items with an empty category field
             parsedJson.lineItems = parsedJson.lineItems.map(item => ({ ...item, category: '' }));
@@ -161,7 +170,7 @@ const App = () => {
         try {
             const prompt = `Based on the item description "${itemDescription}", suggest a single, common business expense category (e.g., "Software", "Office Supplies", "Marketing", "Travel", "Meals & Entertainment"). Respond with only the category name.`;
             const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-            const category = await callGeminiAPI(payload);
+            const category = await callGeminiAPI(payload, apiKey);
             
             setInvoiceData(prevData => {
                 const newLineItems = [...prevData.lineItems];
@@ -195,7 +204,7 @@ const App = () => {
                 generationConfig: { responseMimeType: "application/json" }
             };
 
-            const responseText = await callGeminiAPI(payload);
+            const responseText = await callGeminiAPI(payload, apiKey);
             const categories = JSON.parse(responseText);
 
             setInvoiceData(prevData => {
@@ -244,7 +253,7 @@ const App = () => {
             }
 
             const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-            const emailContent = await callGeminiAPI(payload);
+            const emailContent = await callGeminiAPI(payload, apiKey);
             setModalContent(emailContent);
 
         } catch (err) {
@@ -277,7 +286,7 @@ const App = () => {
         event.currentTarget.classList.remove('bg-blue-100', 'border-blue-400');
         const file = event.dataTransfer.files[0];
         if (file) transcribeInvoice(file);
-    }, []);
+    }, [apiKey]); // Add apiKey dependency
     const handleDragOver = useCallback((e) => { e.preventDefault(); e.stopPropagation(); }, []);
     const handleDragEnter = useCallback((e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.add('bg-blue-100', 'border-blue-400'); }, []);
     const handleDragLeave = useCallback((e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove('bg-blue-100', 'border-blue-400'); }, []);
@@ -345,13 +354,39 @@ const App = () => {
                     </header>
 
                     <main>
+                        <div className="w-full max-w-2xl mx-auto mb-8 p-4 bg-white rounded-xl shadow-md">
+                            <label htmlFor="api-key-input" className="block text-sm font-medium text-gray-700 mb-1">
+                                Google AI API Key
+                            </label>
+                            <input
+                                type="password"
+                                id="api-key-input"
+                                value={apiKey}
+                                onChange={handleApiKeyChange}
+                                placeholder="Paste your API key here to begin"
+                                className="block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            />
+                            <p className="mt-2 text-xs text-gray-500">
+                                Your key is stored securely in your browser's local storage. 
+                                You can get a free key from <a href="https://aistudio.google.com/API" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google AI Studio</a>.
+                            </p>
+                        </div>
+
+
                         {!invoiceData && (
-                             <div className="w-full max-w-2xl mx-auto border-2 border-dashed border-gray-300 rounded-xl p-8 text-center transition-colors duration-300" onDrop={handleDrop} onDragOver={handleDragOver} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave}>
-                                <input type="file" id="file-upload" className="hidden" accept="image/*,application/pdf" onChange={handleFileChange} disabled={isLoading} />
-                                <label htmlFor="file-upload" className="cursor-pointer">
+                             <div 
+                                className="w-full max-w-2xl mx-auto border-2 border-dashed border-gray-300 rounded-xl p-8 text-center transition-colors duration-300" 
+                                onDrop={handleDrop} 
+                                onDragOver={handleDragOver} 
+                                onDragEnter={handleDragEnter} 
+                                onDragLeave={handleDragLeave}
+                            >
+                                <input type="file" id="file-upload" className="hidden" accept="image/*,application/pdf" onChange={handleFileChange} disabled={isLoading || !apiKey} />
+                                <label htmlFor="file-upload" className={!apiKey ? "cursor-not-allowed opacity-50" : "cursor-pointer"}>
                                     <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                                     <p className="mt-2 text-sm text-gray-600"><span className="font-semibold text-blue-600">Click to upload</span> or drag and drop</p>
                                     <p className="text-xs text-gray-500 mt-1">PNG, JPG, PDF, etc.</p>
+                                     {!apiKey && <p className="text-red-500 text-xs mt-2 font-semibold">Please enter an API key above to enable uploads.</p>}
                                 </label>
                             </div>
                         )}
