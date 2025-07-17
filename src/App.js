@@ -14,7 +14,12 @@ const toBase64 = file => new Promise((resolve, reject) => {
 
 // Generic function to call the Gemini API
 const callGeminiAPI = async (payload) => {
-    const apiKey = ""; // API key is handled by the environment
+    // IMPORTANT: This line is changed to use the environment variable
+    const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+    if (!apiKey) {
+        throw new Error("API Key is missing. Please set up your environment variables on Netlify.");
+    }
+    
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
     
     const response = await fetch(apiUrl, {
